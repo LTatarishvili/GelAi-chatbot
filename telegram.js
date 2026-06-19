@@ -8,15 +8,29 @@ const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const pendingReplies = new Map();
 
 async function sendTelegramMessage(text) {
-  const res = await axios.post(
-    `https://api.telegram.org/bot${TOKEN}/sendMessage`,
-    {
-      chat_id: CHAT_ID,
-      text,
-      parse_mode: 'Markdown'
+  try {
+    const res = await axios.post(
+      `https://api.telegram.org/bot${TOKEN}/sendMessage`,
+      {
+        chat_id: CHAT_ID,
+        text,
+        parse_mode: 'Markdown'
+      }
+    );
+    return res.data.result; // includes message_id
+  } catch (err) {
+    // If Markdown parsing failed (bad/unmatched * or _ characters), retry as plain text
+    const isMarkdownError = err.response?.data?.description?.includes("can't parse entities");
+    if (isMarkdownError) {
+      console.warn('⚠️ Telegram Markdown parse failed, retrying as plain text');
+      const res = await axios.post(
+        `https://api.telegram.org/bot${TOKEN}/sendMessage`,
+        { chat_id: CHAT_ID, text }
+      );
+      return res.data.result;
     }
-  );
-  return res.data.result; // includes message_id
+    throw err;
+  }
 }
 
 // Register that a telegram message is waiting for your reply → links to a customer

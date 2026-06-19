@@ -103,15 +103,18 @@ async function handleIncomingMessage(event) {
   await sendTypingOn(psid);
 
   const history = getConversation(psid);
-  const { reply, newHistory, needsHuman, orderData } = await handleMessage(psid, messageText, history);
+  const { reply, newHistory, needsHuman, orderData, orderUpdate } = await handleMessage(psid, messageText, history);
 
   updateConversation(psid, newHistory);
 
   // 🛒 New order completed
   if (orderData) {
+    const profileName = await fetchMessengerProfileName(psid);
+    const orderName = orderData.name?.trim() ? orderData.name : profileName || 'N/A';
+
     const orderText =
       `🛒 *ახალი შეკვეთა!*\n\n` +
-      `👤 სახელი: ${orderData.name}\n` +
+      `👤 სახელი: ${orderName}\n` +
       `📞 ტელეფონი: ${orderData.phone}\n` +
       `📍 მისამართი: ${orderData.address}\n` +
       `🛍️ პროდუქტი: ${orderData.product}\n` +
@@ -119,6 +122,16 @@ async function handleIncomingMessage(event) {
       `_PSID: ${psid}_`;
     await sendTelegramMessage(orderText);
     console.log('✅ Order sent to Telegram');
+  }
+
+  // ✏️ Existing order updated (extra info added) — no human needed, just notify
+  if (orderUpdate) {
+    const updateText =
+      `✏️ *შეკვეთის დამატება/ცვლილება*\n\n` +
+      `${orderUpdate}\n\n` +
+      `_PSID: ${psid}_`;
+    await sendTelegramMessage(updateText);
+    console.log('✏️ Order update sent to Telegram');
   }
 
   // ❓ Human help needed
@@ -142,6 +155,24 @@ async function sendMessengerMessage(psid, text) {
     { recipient: { id: psid }, message: { text } },
     { params: { access_token: PAGE_ACCESS_TOKEN } }
   );
+}
+
+async function fetchMessengerProfileName(psid) {
+  try {
+    const res = await axios.get(`https://graph.facebook.com/v19.0/${psid}`, {
+      params: {
+        fields: 'first_name,last_name',
+        access_token: PAGE_ACCESS_TOKEN
+      }
+    });
+    const user = res.data;
+    if (user.first_name || user.last_name) {
+      return `${user.first_name || ''}${user.first_name && user.last_name ? ' ' : ''}${user.last_name || ''}`.trim();
+    }
+  } catch (err) {
+    console.warn('⚠️ Could not fetch Messenger profile name:', err.message);
+  }
+  return null;
 }
 
 async function sendTypingOn(psid) {
