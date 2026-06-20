@@ -146,9 +146,11 @@ async function handleIncomingMessage(event) {
       existing.updatedAt = Date.now();
       orders.set(orderId, existing);
 
+      const profileLine = `📛 პროფილი: ${existing.profileName ? existing.profileName : 'ველით'}\n`;
       const updateText =
         `✏️ *შეკვეთის დამატება/ცვლილება*\n\n` +
         `🆔 შეკვეთის ID: ${orderId}\n` +
+        `${profileLine}` +
         `${orderUpdate}\n\n` +
         `_PSID: ${psid}_`;
       await sendTelegramMessage(updateText);
@@ -158,9 +160,11 @@ async function handleIncomingMessage(event) {
       const newId = `${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
       pendingOrders.set(psid, newId);
       orders.set(newId, { id: newId, psid, updates: [{ text: orderUpdate, at: Date.now() }], createdAt: Date.now() });
+      const profileLine = `📛 პროფილი: ველით\n`;
       const updateText =
         `✏️ *შეკვეთის დამატება/ცვლილება*\n\n` +
         `🆔 შეკვეთის ID: ${newId}\n` +
+        `${profileLine}` +
         `${orderUpdate}\n\n` +
         `_PSID: ${psid}_`;
       await sendTelegramMessage(updateText);
