@@ -11,6 +11,10 @@ app.use(express.json());
 const PAGE_ACCESS_TOKEN = process.env.FB_PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.FB_VERIFY_TOKEN;
 
+// In-memory order tracking: psid -> orderId, orderId -> order details
+const pendingOrders = new Map();
+const orders = new Map();
+
 // ─────────────────────────────────────────────
 // FACEBOOK WEBHOOK
 // ─────────────────────────────────────────────
@@ -110,28 +114,58 @@ async function handleIncomingMessage(event) {
   // 🛒 New order completed
   if (orderData) {
     const profileName = await fetchMessengerProfileName(psid);
-    const orderName = orderData.name?.trim() ? orderData.name : profileName || 'N/A';
+    const orderName = orderData.name?.trim() ? orderData.name : (profileName || 'N/A');
+    const profileLine = `📛 პროფილი: ${profileName ? profileName : ''}\n`;
+
+    // create unique order id
+    const orderId = `${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    pendingOrders.set(psid, orderId);
+    orders.set(orderId, { id: orderId, psid, profileName, ...orderData, createdAt: Date.now() });
 
     const orderText =
       `🛒 *ახალი შეკვეთა!*\n\n` +
+      `🆔 შეკვეთის ID: ${orderId}\n` +
       `👤 სახელი: ${orderName}\n` +
+      `${profileLine}` +
       `📞 ტელეფონი: ${orderData.phone}\n` +
       `📍 მისამართი: ${orderData.address}\n` +
       `🛍️ პროდუქტი: ${orderData.product}\n` +
       `💰 ფასი: ${orderData.price}\n\n` +
       `_PSID: ${psid}_`;
     await sendTelegramMessage(orderText);
-    console.log('✅ Order sent to Telegram');
+    console.log(`✅ Order ${orderId} sent to Telegram`);
   }
 
-  // ✏️ Existing order updated (extra info added) — no human needed, just notify
+  // ✏️ Existing order updated (extra info added) — attach to same order id
   if (orderUpdate) {
-    const updateText =
-      `✏️ *შეკვეთის დამატება/ცვლილება*\n\n` +
-      `${orderUpdate}\n\n` +
-      `_PSID: ${psid}_`;
-    await sendTelegramMessage(updateText);
-    console.log('✏️ Order update sent to Telegram');
+    const orderId = pendingOrders.get(psid);
+    if (orderId && orders.has(orderId)) {
+      const existing = orders.get(orderId);
+      existing.updates = existing.updates || [];
+      existing.updates.push({ text: orderUpdate, at: Date.now() });
+      existing.updatedAt = Date.now();
+      orders.set(orderId, existing);
+
+      const updateText =
+        `✏️ *შეკვეთის დამატება/ცვლილება*\n\n` +
+        `🆔 შეკვეთის ID: ${orderId}\n` +
+        `${orderUpdate}\n\n` +
+        `_PSID: ${psid}_`;
+      await sendTelegramMessage(updateText);
+      console.log(`✏️ Order ${orderId} update sent to Telegram`);
+    } else {
+      // no existing order, create a new order id for this update
+      const newId = `${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+      pendingOrders.set(psid, newId);
+      orders.set(newId, { id: newId, psid, updates: [{ text: orderUpdate, at: Date.now() }], createdAt: Date.now() });
+      const updateText =
+        `✏️ *შეკვეთის დამატება/ცვლილება*\n\n` +
+        `🆔 შეკვეთის ID: ${newId}\n` +
+        `${orderUpdate}\n\n` +
+        `_PSID: ${psid}_`;
+      await sendTelegramMessage(updateText);
+      console.log(`✏️ Order ${newId} (created for update) sent to Telegram`);
+    }
   }
 
   // ❓ Human help needed
