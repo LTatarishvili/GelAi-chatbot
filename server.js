@@ -76,7 +76,7 @@ app.post('/telegram', async (req, res) => {
 
     if (psid) {
       const yourAnswer = msg.text;
-      await sendMessengerMessage(psid, `💬 ოპერატორი: ${yourAnswer}`);
+      await sendMessengerMessage(psid, yourAnswer);
       await sendTelegramMessage(`✅ პასუხი გაეგზავნა კლიენტს.`);
       console.log(`📤 Admin reply forwarded to customer ${psid}`);
     } else {
@@ -179,11 +179,13 @@ async function handleIncomingMessage(event) {
 
   // ❓ Human help needed
   if (needsHuman) {
+    const botSaid = (reply && reply.trim()) ? `🤖 ბოტმა უპასუხა: "${reply.trim()}"\n` : '';
     const questionText =
       `❓ *კლიენტი ელოდება პასუხს*\n\n` +
       `📛 Facebook: ${fbName || '—'}\n` +
-      `კითხვა: "${messageText}"\n\n` +
-      `↩️ *Reply-ით* გიპასუხე ამ შეტყობინებაზე — კლიენტს ავტომატურად გაეგზავნება.\n\n` +
+      `კითხვა: "${messageText}"\n` +
+      botSaid +
+      `\n↩️ *Reply-ით* გიპასუხე ამ შეტყობინებაზე — კლიენტს ავტომატურად გაეგზავნება.\n\n` +
       `_PSID: ${psid}_`;
     const tgMsg = await sendTelegramMessage(questionText);
     setPendingReply(tgMsg.message_id, psid);
