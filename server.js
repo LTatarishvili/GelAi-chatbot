@@ -135,7 +135,8 @@ async function handleIncomingMessage(event) {
       `📞 ტელეფონი: ${orderData.phone}\n` +
       `📍 მისამართი: ${orderData.address}\n` +
       `🛍️ პროდუქტი: ${orderData.product}\n` +
-      `💰 ფასი: ${orderData.price}\n\n` +
+      `🚚 მიწოდება: ${orderData.delivery || '—'}\n` +
+      `💰 ასაღები ჯამი: ${orderData.price}\n\n` +
       `_PSID: ${psid}_`;
     await sendTelegramMessage(orderText);
     console.log(`✅ Order ${orderId} sent to Telegram`);
