@@ -15,6 +15,10 @@ const VERIFY_TOKEN = process.env.FB_VERIFY_TOKEN;
 const pendingOrders = new Map();
 const orders = new Map();
 
+// Cache of Facebook profile names: psid -> "First Last"
+// Avoids hitting the Graph API on every single message from the same customer.
+const profileNameCache = new Map();
+
 // ─────────────────────────────────────────────
 // FACEBOOK WEBHOOK
 // ─────────────────────────────────────────────
@@ -72,10 +76,7 @@ app.post('/telegram', async (req, res) => {
 
     if (psid) {
       const yourAnswer = msg.text;
-      await sendMessengerMessage(
-        psid,
-        `💬 ოპერატორი: ${yourAnswer}`
-      );
+      await sendMessengerMessage(psid, `💬 ოპერატორი: ${yourAnswer}`);
       await sendTelegramMessage(`✅ პასუხი გაეგზავნა კლიენტს.`);
       console.log(`📤 Admin reply forwarded to customer ${psid}`);
     } else {
@@ -89,7 +90,7 @@ app.post('/telegram', async (req, res) => {
 // ─────────────────────────────────────────────
 
 app.get('/', (req, res) => {
-  res.send('Allsale chatbot is running ✅');
+  res.send('GelAI chatbot is running ✅');
 });
 
 // ─────────────────────────────────────────────
@@ -106,27 +107,31 @@ async function handleIncomingMessage(event) {
 
   await sendTypingOn(psid);
 
+  // Fetch the customer's Facebook name once (cached) so we can:
+  //  1) feed it into the LLM system prompt (personalised replies)
+  //  2) show it in every Telegram notification to the operator
+  const fbName = await getProfileName(psid);
+
   const history = getConversation(psid);
-  const { reply, newHistory, needsHuman, orderData, orderUpdate } = await handleMessage(psid, messageText, history);
+  const { reply, newHistory, needsHuman, orderData, orderUpdate } =
+    await handleMessage(psid, messageText, history, fbName);
 
   updateConversation(psid, newHistory);
 
   // 🛒 New order completed
   if (orderData) {
-    const profileName = await fetchMessengerProfileName(psid);
-    const orderName = orderData.name?.trim() ? orderData.name : (profileName || 'N/A');
-    const profileLine = `📛 პროფილი: ${profileName ? profileName : ''}\n`;
+    const orderName = orderData.name?.trim() ? orderData.name : (fbName || 'N/A');
 
     // create unique order id
-    const orderId = `${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    const orderId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     pendingOrders.set(psid, orderId);
-    orders.set(orderId, { id: orderId, psid, profileName, ...orderData, createdAt: Date.now() });
+    orders.set(orderId, { id: orderId, psid, profileName: fbName, ...orderData, createdAt: Date.now() });
 
     const orderText =
       `🛒 *ახალი შეკვეთა!*\n\n` +
       `🆔 შეკვეთის ID: ${orderId}\n` +
       `👤 სახელი: ${orderName}\n` +
-      `${profileLine}` +
+      `📛 Facebook: ${fbName || '—'}\n` +
       `📞 ტელეფონი: ${orderData.phone}\n` +
       `📍 მისამართი: ${orderData.address}\n` +
       `🛍️ პროდუქტი: ${orderData.product}\n` +
@@ -146,25 +151,24 @@ async function handleIncomingMessage(event) {
       existing.updatedAt = Date.now();
       orders.set(orderId, existing);
 
-      const profileLine = `📛 პროფილი: ${existing.profileName ? existing.profileName : 'ველით'}\n`;
       const updateText =
         `✏️ *შეკვეთის დამატება/ცვლილება*\n\n` +
         `🆔 შეკვეთის ID: ${orderId}\n` +
-        `${profileLine}` +
+        `📛 Facebook: ${existing.profileName || fbName || '—'}\n` +
         `${orderUpdate}\n\n` +
         `_PSID: ${psid}_`;
       await sendTelegramMessage(updateText);
       console.log(`✏️ Order ${orderId} update sent to Telegram`);
     } else {
       // no existing order, create a new order id for this update
-      const newId = `${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+      const newId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       pendingOrders.set(psid, newId);
-      orders.set(newId, { id: newId, psid, updates: [{ text: orderUpdate, at: Date.now() }], createdAt: Date.now() });
-      const profileLine = `📛 პროფილი: ველით\n`;
+      orders.set(newId, { id: newId, psid, profileName: fbName, updates: [{ text: orderUpdate, at: Date.now() }], createdAt: Date.now() });
+
       const updateText =
         `✏️ *შეკვეთის დამატება/ცვლილება*\n\n` +
         `🆔 შეკვეთის ID: ${newId}\n` +
-        `${profileLine}` +
+        `📛 Facebook: ${fbName || '—'}\n` +
         `${orderUpdate}\n\n` +
         `_PSID: ${psid}_`;
       await sendTelegramMessage(updateText);
@@ -176,7 +180,8 @@ async function handleIncomingMessage(event) {
   if (needsHuman) {
     const questionText =
       `❓ *კლიენტი ელოდება პასუხს*\n\n` +
-      `"${messageText}"\n\n` +
+      `📛 Facebook: ${fbName || '—'}\n` +
+      `კითხვა: "${messageText}"\n\n` +
       `↩️ *Reply-ით* გიპასუხე ამ შეტყობინებაზე — კლიენტს ავტომატურად გაეგზავნება.\n\n` +
       `_PSID: ${psid}_`;
     const tgMsg = await sendTelegramMessage(questionText);
@@ -184,7 +189,10 @@ async function handleIncomingMessage(event) {
     console.log(`🆘 Human help requested for ${psid}`);
   }
 
-  await sendMessengerMessage(psid, reply);
+  // Send the bot's reply to the customer (skip if empty to avoid a Facebook API error)
+  if (reply && reply.trim()) {
+    await sendMessengerMessage(psid, reply);
+  }
 }
 
 async function sendMessengerMessage(psid, text) {
@@ -193,6 +201,18 @@ async function sendMessengerMessage(psid, text) {
     { recipient: { id: psid }, message: { text } },
     { params: { access_token: PAGE_ACCESS_TOKEN } }
   );
+}
+
+// Cached wrapper around the Graph API call
+async function getProfileName(psid) {
+  if (profileNameCache.has(psid)) {
+    return profileNameCache.get(psid);
+  }
+  const name = await fetchMessengerProfileName(psid);
+  if (name) {
+    profileNameCache.set(psid, name);
+  }
+  return name;
 }
 
 async function fetchMessengerProfileName(psid) {
