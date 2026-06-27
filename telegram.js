@@ -7,7 +7,7 @@ const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 // So when you reply to a Telegram message, we know which customer to answer
 const pendingReplies = new Map();
 
-async function sendTelegramMessage(text) {
+async function sendTelegramMessage(text, attempt = 1) {
   try {
     const res = await axios.post(
       `https://api.telegram.org/bot${TOKEN}/sendMessage`,
@@ -29,6 +29,15 @@ async function sendTelegramMessage(text) {
       );
       return res.data.result;
     }
+
+    // Telegram's own servers had a hiccup (502/503/504) — retry a couple of times
+    const isServerError = err.response?.status >= 500;
+    if (isServerError && attempt < 3) {
+      console.warn(`⚠️ Telegram ${err.response.status} — retrying (attempt ${attempt + 1}/3)...`);
+      await new Promise(r => setTimeout(r, 1500 * attempt)); // 1.5s, then 3s
+      return sendTelegramMessage(text, attempt + 1);
+    }
+
     throw err;
   }
 }

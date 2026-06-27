@@ -117,8 +117,14 @@ async function handleIncomingMessage(event) {
       `🛍️ პროდუქტი: ${orderData.product}\n` +
       `💰 ფასი: ${orderData.price}\n\n` +
       `_PSID: ${psid}_`;
-    await sendTelegramMessage(orderText);
-    console.log('✅ Order sent to Telegram');
+    try {
+      await sendTelegramMessage(orderText);
+      console.log('✅ Order sent to Telegram');
+    } catch (err) {
+      // Telegram failed even after retries — log full order so nothing is lost
+      console.error('❌ FAILED TO SEND ORDER TO TELEGRAM:', err.message);
+      console.error('🛒 ORDER DETAILS (recover manually):', JSON.stringify(orderData), `PSID: ${psid}`);
+    }
   }
 
   // ✏️ Existing order updated (extra info added) — no human needed, just notify
@@ -127,8 +133,13 @@ async function handleIncomingMessage(event) {
       `✏️ *შეკვეთის დამატება/ცვლილება*\n\n` +
       `${orderUpdate}\n\n` +
       `_PSID: ${psid}_`;
-    await sendTelegramMessage(updateText);
-    console.log('✏️ Order update sent to Telegram');
+    try {
+      await sendTelegramMessage(updateText);
+      console.log('✏️ Order update sent to Telegram');
+    } catch (err) {
+      console.error('❌ FAILED TO SEND ORDER UPDATE TO TELEGRAM:', err.message);
+      console.error('✏️ UPDATE DETAILS (recover manually):', orderUpdate, `PSID: ${psid}`);
+    }
   }
 
   // ❓ Human help needed
@@ -138,9 +149,13 @@ async function handleIncomingMessage(event) {
       `"${messageText}"\n\n` +
       `↩️ *Reply-ით* გიპასუხე ამ შეტყობინებაზე — კლიენტს ავტომატურად გაეგზავნება.\n\n` +
       `_PSID: ${psid}_`;
-    const tgMsg = await sendTelegramMessage(questionText);
-    setPendingReply(tgMsg.message_id, psid);
-    console.log(`🆘 Human help requested for ${psid}`);
+    try {
+      const tgMsg = await sendTelegramMessage(questionText);
+      setPendingReply(tgMsg.message_id, psid);
+      console.log(`🆘 Human help requested for ${psid}`);
+    } catch (err) {
+      console.error('❌ FAILED TO SEND HELP REQUEST TO TELEGRAM:', err.message, `PSID: ${psid}`);
+    }
   }
 
   await sendMessengerMessage(psid, reply);
